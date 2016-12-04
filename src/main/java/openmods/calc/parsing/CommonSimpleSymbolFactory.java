@@ -70,13 +70,13 @@ public class CommonSimpleSymbolFactory<E> {
 		}
 	}
 
-	private static class KeyValueSeparator<E> extends BinaryOperator<E> {
+	private static class KeyValueSeparator<E> extends BinaryOperator.Direct<E> {
 		private KeyValueSeparator(String id, int precendence) {
 			super(id, precendence);
 		}
 
 		@Override
-		public E execute(E left, E right) {
+		public E execute(SymbolMap<E> symbols, E left, E right) {
 			throw new UnsupportedOperationException(); // not supposed to be used directly;
 		}
 	}

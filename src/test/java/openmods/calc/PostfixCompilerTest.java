@@ -31,7 +31,7 @@ public class PostfixCompilerTest extends CalcTestUtils {
 		@Override
 		public Result acceptToken(Token token) {
 			Preconditions.checkState(result == null);
-			result = Value.create(rawTokenString(token));
+			result = Value.createCons(rawTokenString(token));
 			return Result.ACCEPTED_AND_FINISHED;
 		}
 

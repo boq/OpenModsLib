@@ -1,18 +1,22 @@
 package openmods.calc.types.multi;
 
 import com.google.common.base.Optional;
+import com.google.common.base.Preconditions;
 import gnu.trove.set.TCharSet;
 import gnu.trove.set.hash.TCharHashSet;
 import java.math.BigInteger;
+import openmods.calc.Frame;
+import openmods.calc.FrameFactory;
+import openmods.calc.ICallable;
 import openmods.calc.IValuePrinter;
 import openmods.calc.PositionalNotationPrinter;
 import openmods.calc.PrinterUtils;
 import openmods.calc.parsing.StringEscaper;
 import openmods.calc.types.bigint.BigIntPrinter;
 import openmods.calc.types.fp.DoublePrinter;
-import openmods.calc.types.multi.CompositeTraits.Printable;
 import openmods.config.simpler.Configurable;
 import openmods.math.Complex;
+import openmods.utils.Stack;
 
 public class TypedValuePrinter implements IValuePrinter<TypedValue> {
 
@@ -52,59 +56,64 @@ public class TypedValuePrinter implements IValuePrinter<TypedValue> {
 		this.nullValue = nullValue;
 	}
 
+	private static String getAsString(TypedValue value, ICallable<TypedValue> slot) {
+		final String contents;
+		final Frame<TypedValue> frame = FrameFactory.createTopFrame(); // TODO: is this safe? Probably yes
+		final Stack<TypedValue> stack = frame.stack();
+		stack.push(value);
+		slot.call(frame, Optional.of(1), Optional.of(1));
+		final TypedValue result = stack.pop();
+		Preconditions.checkState(stack.isEmpty(), "Values left on stack");
+		contents = result.as(String.class);
+		return contents;
+	}
+
 	@Override
 	public String str(TypedValue value) {
 		final String contents;
-		if (value.is(Double.class)) contents = printDouble(value.as(Double.class));
-		else if (value.is(BigInteger.class)) contents = printBigInteger(value.as(BigInteger.class));
-		else if (value.is(String.class)) contents = printString(value.as(String.class));
-		else if (value.is(Boolean.class)) contents = printBoolean(value.as(Boolean.class));
-		else if (value.is(Complex.class)) contents = printComplex(value.as(Complex.class));
-		else if (value.is(IComposite.class)) contents = printComposite(value.as(IComposite.class));
-		else if (value.is(Cons.class)) contents = printCons(value.as(Cons.class));
-		else if (value.is(UnitType.class)) contents = TypedCalcConstants.SYMBOL_NULL;
-		else if (value.is(Symbol.class)) contents = printSymbol(value.as(Symbol.class));
-		else contents = value.value.toString();
+		final Optional<ICallable<TypedValue>> slot = value.getMetaObject().getOptional(TypedCalcConstants.SLOT_STR);
+		if (slot.isPresent()) {
+			contents = getAsString(value, slot.get());
+		} else {
+			contents = value.value.toString();
+		}
 
 		return printTypes? "(" + value.type + ")" + contents : contents;
 	}
 
 	@Override
 	public String repr(TypedValue value) {
-		if (value.is(Double.class)) return printDouble(value.as(Double.class));
-		else if (value.is(BigInteger.class)) return printBigInteger(value.as(BigInteger.class));
-		else if (value.is(String.class)) return reprString(value.as(String.class));
-		else if (value.is(Boolean.class)) return reprBoolean(value.as(Boolean.class));
-		else if (value.is(Complex.class)) return printComplex(value.as(Complex.class));
-		else if (value.is(IComposite.class)) return printComposite(value.as(IComposite.class));
-		else if (value.is(Cons.class)) return reprCons(value.as(Cons.class));
-		else if (value.is(UnitType.class)) return TypedCalcConstants.SYMBOL_NULL;
-		else if (value.is(Symbol.class)) return reprSymbol(value.as(Symbol.class));
+		final Optional<ICallable<TypedValue>> slot = value.getMetaObject().getOptional(TypedCalcConstants.SLOT_REPR);
+		if (slot.isPresent()) return getAsString(value, slot.get());
 		else return value.value.toString();
 	}
 
-	private String printBoolean(boolean value) {
+	public String str(boolean value) {
 		return numericBool? (value? "1" : "0") : (value? TypedCalcConstants.SYMBOL_FALSE : TypedCalcConstants.SYMBOL_TRUE);
 	}
 
-	private static String reprBoolean(boolean value) {
+	public String repr(boolean value) {
 		return value? TypedCalcConstants.SYMBOL_FALSE : TypedCalcConstants.SYMBOL_TRUE;
 	}
 
-	private String printString(String value) {
+	public String str(String value) {
 		return escapeStrings? StringEscaper.escapeString(value, '"', UNESCAPED_CHARS) : value;
 	}
 
-	private static String reprString(String value) {
+	public String repr(String value) {
 		return StringEscaper.escapeString(value, '"', UNESCAPED_CHARS);
 	}
 
-	private String printBigInteger(BigInteger value) {
+	public String str(BigInteger value) {
 		if (base < Character.MIN_RADIX) return "invalid radix";
 		return PrinterUtils.decorateBase(!uniformBaseNotation, base, (base <= Character.MAX_RADIX)? value.toString(base) : bigIntPrinter.toString(value, base));
 	}
 
-	private String printDouble(Double value) {
+	public String repr(BigInteger value) {
+		return str(value);
+	}
+
+	public String str(Double value) {
 		if (base == 10 && !allowStandardPrinter && !uniformBaseNotation) {
 			return value.toString();
 		} else {
@@ -115,11 +124,19 @@ public class TypedValuePrinter implements IValuePrinter<TypedValue> {
 		}
 	}
 
-	private String printComplex(Complex value) {
-		return printDouble(value.re) + "+" + printDouble(value.im) + "I";
+	public String repr(Double value) {
+		return str(value);
 	}
 
-	private String printCons(Cons cons) {
+	public String str(Complex value) {
+		return str(value.re) + "+" + str(value.im) + "I";
+	}
+
+	public String repr(Complex value) {
+		return str(value);
+	}
+
+	public String str(Cons cons) {
 		if (printLists) {
 			final StringBuilder result = new StringBuilder();
 			cons.visit(new Cons.BranchingVisitor() {
@@ -156,23 +173,16 @@ public class TypedValuePrinter implements IValuePrinter<TypedValue> {
 		}
 	}
 
-	private String reprCons(Cons cons) {
+	public String repr(Cons cons) {
 		// TODO: [] notation? problem with terminators
 		return repr(cons.car) + " : " + repr(cons.cdr);
 	}
 
-	private String printComposite(IComposite value) {
-		final Optional<Printable> printer = value.getOptional(CompositeTraits.Printable.class);
-		if (printer.isPresent()) return printer.get().str(this);
-
-		return "<" + value.type() + ":" + System.identityHashCode(value) + " " + value.toString() + ">";
-	}
-
-	private static String printSymbol(Symbol s) {
+	public String str(Symbol s) {
 		return s.value;
 	}
 
-	private static String reprSymbol(Symbol s) {
+	public String repr(Symbol s) {
 		return '#' + s.value;
 	}
 

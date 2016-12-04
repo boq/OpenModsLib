@@ -5,8 +5,8 @@ import com.google.common.base.Preconditions;
 import java.util.Iterator;
 import openmods.calc.Frame;
 import openmods.calc.FrameFactory;
+import openmods.calc.ICallable;
 import openmods.calc.SingleReturnCallable;
-import openmods.calc.SymbolMap;
 import openmods.utils.Stack;
 
 public abstract class LogicFunction extends SingleReturnCallable<TypedValue> {
@@ -24,14 +24,17 @@ public abstract class LogicFunction extends SingleReturnCallable<TypedValue> {
 		if (argCount == 0)
 			return nullValue;
 
-		final SymbolMap<TypedValue> symbols = frame.symbols();
 		final Stack<TypedValue> args = frame.stack().substack(argCount);
 		final Iterator<TypedValue> it = args.iterator();
 
+		final Frame<TypedValue> scratchFrame = FrameFactory.newLocalFrame(frame);
+
 		TypedValue arg;
 		do {
-			arg = extract(symbols, it.next());
-			if (shouldReturn(arg)) break;
+			execute(scratchFrame, it.next());
+			arg = scratchFrame.stack().peek(0);
+			boolean boolValue = getBoolValue(scratchFrame, arg);
+			if (shouldReturn(boolValue)) break;
 		} while (it.hasNext());
 
 		args.clear();
@@ -39,9 +42,15 @@ public abstract class LogicFunction extends SingleReturnCallable<TypedValue> {
 		return arg;
 	}
 
-	protected abstract boolean shouldReturn(TypedValue value);
+	protected abstract boolean shouldReturn(boolean value);
 
-	protected abstract TypedValue extract(SymbolMap<TypedValue> symbolMap, TypedValue value);
+	protected abstract void execute(Frame<TypedValue> scratch, TypedValue value);
+
+	protected boolean getBoolValue(Frame<TypedValue> scratchFrame, TypedValue arg) {
+		final ICallable<TypedValue> slot = arg.getMetaObject().get(TypedCalcConstants.SLOT_BOOL);
+		slot.call(scratchFrame, Optional.of(1), Optional.of(1));
+		return scratchFrame.stack().pop().as(Boolean.class, "bool value");
+	}
 
 	public abstract static class Eager extends LogicFunction {
 
@@ -50,8 +59,8 @@ public abstract class LogicFunction extends SingleReturnCallable<TypedValue> {
 		}
 
 		@Override
-		protected TypedValue extract(SymbolMap<TypedValue> symbolMap, TypedValue value) {
-			return value;
+		protected void execute(Frame<TypedValue> scratch, TypedValue value) {
+			scratch.stack().push(value);
 		}
 
 	}
@@ -63,16 +72,13 @@ public abstract class LogicFunction extends SingleReturnCallable<TypedValue> {
 		}
 
 		@Override
-		protected TypedValue extract(SymbolMap<TypedValue> symbolMap, TypedValue value) {
+		protected void execute(Frame<TypedValue> scratch, TypedValue value) {
 			final Code code = value.as(Code.class);
-			final Frame<TypedValue> evalFrame = FrameFactory.symbolsToFrame(symbolMap);
 
-			code.execute(evalFrame);
+			code.execute(scratch);
 
-			final Stack<TypedValue> stack = evalFrame.stack();
+			final Stack<TypedValue> stack = scratch.stack();
 			Preconditions.checkState(stack.size() == 1, "More than one value returned from %s", code);
-
-			return stack.pop();
 		}
 
 	}
